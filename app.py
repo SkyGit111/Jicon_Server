@@ -1,66 +1,33 @@
-from datetime import timedelta
+# app.py
 
-from flask import Flask, jsonify
+import pkgutil
+import importlib
+from flask import Flask, Blueprint
+from config import Config
+from extensions import db, jwt, cors
 
-from extension import init_extension
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
 
-from flask_cors import CORS
+    # ── 1. 初始化所有扩展插件 ─────────────────────────────
+    db.init_app(app)
+    jwt.init_app(app)
+    cors.init_app(app)
 
-from Controller.MarketController import marketcontroller
-from Controller.UserController import usercontroller
-from Controller.ChatController import chatcontoller
-from Controller.AgentCreationController import agentcreationcontroller
+    # ── 2. 自动扫描并注册 routes 目录下所有 Blueprint ──────
+    #    要求：每个路由文件都必须在顶部定义一个 Blueprint 实例
+    import routes
+    for finder, module_name, ispkg in pkgutil.iter_modules(routes.__path__):
+        module = importlib.import_module(f"routes.{module_name}")
+        # 遍历模块中所有属性，寻找 Blueprint 实例并注册
+        for attr in vars(module).values():
+            if isinstance(attr, Blueprint):
+                app.register_blueprint(attr)
 
-from databasecfg import Config
+    # ── 3. 基本测试接口 ────────────────────────────────────
+    @app.route('/')
+    def hello():
+        return '系统后端运行中'
 
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-
-app = Flask(__name__)
-
-
-# 设置 JWT 的有效时长为 1 小时
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
-# JWT配置
-app.config['JWT_SECRET_KEY'] = 'wuchensercet123456789'  # Change this!
-jwt = JWTManager(app)
-
-
-# 跨域
-CORS(app, resources={r"/*": {"origins": "*"}})
-
-# class Config(object):
-#     # 数据库配置
-#     # mysql+pymysql://用户名:密码@localhost:3306/数据库名
-#     SQLALCHEMY_DATABASE_URI = 'mysql://wuchen:WUchen24863179@101.37.88.111:3306/razor-ai'
-#     # 设置每次请求结束后会自动提交数据库中的改动
-#     SQLALCHEMY_COMMIT_ON_TEARDOWN = False
-#     # 设置执行完操作后自动提交
-#     SQLALCHEMY_TRACK_MODIFICATIONS = True
-
-# 使用从 databasecfg 导入的 Config 类进行配置
-app.config.from_object(Config)
-
-# 初始化拓展
-init_extension(app=app)
-
-# app.register_blueprint(xxxx,url_prefix='/xxx')   # 添加蓝图
-# app.register_blueprint(blueprint=admin)  # 后台管理
-app.register_blueprint(blueprint=usercontroller)  # user
-app.register_blueprint(blueprint=chatcontoller)  # chat
-app.register_blueprint(blueprint=agentcreationcontroller)  #
-app.register_blueprint(blueprint=marketcontroller)
-
-
-# 路由
-@app.route('/')
-def hello_world():
-    return 'RAZOR-AI后端'
-
-
-@app.route('/test')
-def frontend_test():
-    data = {'code': 200, 'data': '前端请求测试'}
-    return jsonify(data)
-
-# if __name__ == '__main__':
-#     app.run(debug=True)
+    return app
