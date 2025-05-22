@@ -1,62 +1,113 @@
+# routes/admin_routes.py
+
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import (
+    create_access_token, jwt_required, get_jwt_identity
+)
+from sqlalchemy.exc import SQLAlchemyError
+from marshmallow import ValidationError
+
 from extensions import db
 from models.admin import Admin
 from schemas.admin_schema import AdminSchema
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
-admin_schema  = AdminSchema()
-admins_schema = AdminSchema(many=True)
 
-# 注册（signup）
+# Schemas
+admin_schema   = AdminSchema()
+admins_schema  = AdminSchema(many=True)
+
+
 @admin_bp.route('/signup', methods=['POST'])
 def signup():
-    data = admin_schema.load(request.get_json())
+    """
+    注册新管理员（公开接口，不需登录）。
+    """
+    try:
+        data = admin_schema.load(request.get_json() or {})
+    except ValidationError as err:
+        return jsonify({"error": err.messages}), 400
+
     if Admin.query.filter_by(email=data['email']).first():
-        return jsonify({"msg": "Email 已被使用"}), 400
+        return jsonify({"error": "邮箱已被使用"}), 400
+
     admin = Admin(**data)
-    db.session.add(admin)
-    db.session.commit()
+    try:
+        db.session.add(admin)
+        db.session.commit()
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
     return admin_schema.jsonify(admin), 201
 
-# 登录（signin）
+
 @admin_bp.route('/signin', methods=['POST'])
 def signin():
-    body = request.get_json()
-    admin = Admin.query.filter_by(email=body.get('email')).first()
-    if not admin or admin.disabled or admin.password != body.get('password'):
-        return jsonify({"msg": "账号或密码错误"}), 401
+    """
+    管理员登录，返回 JWT token（公开接口）。
+    """
+    body = request.get_json() or {}
+    email = body.get('email')
+    password = body.get('password')
+    if not email or not password:
+        return jsonify({"error": "缺少 email 或 password"}), 400
+
+    admin = Admin.query.filter_by(email=email).first()
+    if not admin or admin.disabled or admin.password != password:
+        return jsonify({"error": "账号或密码错误"}), 401
+
     token = create_access_token(identity=admin.id)
     return jsonify({"access_token": token}), 200
 
-# 修改密码（changePwd）
+
 @admin_bp.route('/<int:id>/password', methods=['PUT'])
 @jwt_required()
-def change_pwd(id):
+def change_password(id):
+    """
+    修改管理员密码（需登录）。
+    """
     admin = Admin.query.get_or_404(id)
-    data = request.get_json()
+    data = request.get_json() or {}
     new_pwd = data.get('password')
     if not new_pwd or len(new_pwd) < 6:
-        return jsonify({"msg": "密码长度至少 6 位"}), 400
-    admin.password = new_pwd
-    db.session.commit()
-    return jsonify({"msg": "密码更新成功"}), 200
+        return jsonify({"error": "密码长度至少 6 位"}), 400
 
-# 禁用（disable）
+    admin.password = new_pwd
+    try:
+        db.session.commit()
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"message": "密码更新成功"}), 200
+
+
 @admin_bp.route('/<int:id>/disable', methods=['PUT'])
 @jwt_required()
-def disable(id):
+def disable_admin(id):
+    """
+    禁用管理员账号（需登录）。
+    """
     admin = Admin.query.get_or_404(id)
     admin.disabled = True
-    db.session.commit()
-    return jsonify({"msg": "管理员已禁用"}), 200
+    try:
+        db.session.commit()
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
-# 查询所有 & 分页
+    return jsonify({"message": "管理员已禁用"}), 200
+
+
 @admin_bp.route('/', methods=['GET'])
 @jwt_required()
 def list_admins():
-    page = int(request.args.get('page', 1))
-    size = int(request.args.get('size', 10))
+    """
+    分页查询管理员列表（需登录）。
+    """
+    page = request.args.get('page', 1, type=int)
+    size = min(request.args.get('size', 10, type=int), 100)
     pag = Admin.query.paginate(page=page, per_page=size, error_out=False)
     return jsonify({
         "total": pag.total,
@@ -64,39 +115,77 @@ def list_admins():
         "items": admins_schema.dump(pag.items)
     }), 200
 
-# 获取单个
+
 @admin_bp.route('/<int:id>', methods=['GET'])
 @jwt_required()
 def get_admin(id):
+    """
+    获取单个管理员详情（需登录）。
+    """
     admin = Admin.query.get_or_404(id)
     return admin_schema.jsonify(admin), 200
 
-# CRUD: 创建
+
 @admin_bp.route('/', methods=['POST'])
 @jwt_required()
 def create_admin():
-    data = admin_schema.load(request.get_json())
+    """
+    创建管理员（需登录）。
+    """
+    try:
+        data = admin_schema.load(request.get_json() or {})
+    except ValidationError as err:
+        return jsonify({"error": err.messages}), 400
+
+    if Admin.query.filter_by(email=data['email']).first():
+        return jsonify({"error": "邮箱已存在"}), 400
+
     admin = Admin(**data)
-    db.session.add(admin)
-    db.session.commit()
+    try:
+        db.session.add(admin)
+        db.session.commit()
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
     return admin_schema.jsonify(admin), 201
 
-# CRUD: 更新
+
 @admin_bp.route('/<int:id>', methods=['PUT'])
 @jwt_required()
 def update_admin(id):
+    """
+    更新管理员信息（需登录）。
+    """
     admin = Admin.query.get_or_404(id)
-    data = admin_schema.load(request.get_json(), partial=True)
-    for k, v in data.items():
-        setattr(admin, k, v)
-    db.session.commit()
+    try:
+        data = admin_schema.load(request.get_json() or {}, partial=True)
+    except ValidationError as err:
+        return jsonify({"error": err.messages}), 400
+
+    for key, val in data.items():
+        setattr(admin, key, val)
+    try:
+        db.session.commit()
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
     return admin_schema.jsonify(admin), 200
 
-# CRUD: 删除
+
 @admin_bp.route('/<int:id>', methods=['DELETE'])
 @jwt_required()
 def delete_admin(id):
+    """
+    删除管理员（需登录）。
+    """
     admin = Admin.query.get_or_404(id)
-    db.session.delete(admin)
-    db.session.commit()
-    return jsonify({"msg": "删除成功"}), 200
+    try:
+        db.session.delete(admin)
+        db.session.commit()
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"message": "删除成功"}), 200

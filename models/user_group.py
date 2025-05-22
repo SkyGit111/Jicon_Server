@@ -7,8 +7,7 @@ class UserGroup(db.Model):
     name    = db.Column(db.String(20), nullable=False)
     members = db.Column(db.Text)
 
-    # 关联到 Terminal
-    terminals = db.relationship('Terminal', backref='group', lazy=True)
+
 
     def to_dict(self):
         return {

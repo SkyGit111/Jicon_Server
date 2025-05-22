@@ -8,8 +8,8 @@ class Message(db.Model):
     content  = db.Column(Text, nullable=False)      # 改为 Text 类型
     label    = db.Column(db.String(20))
 
-    detections = db.relationship('Detection', backref='message', lazy=True)
-    results    = db.relationship('Result', backref='message', lazy=True)
+    detections = db.relationship('Detection', lazy=True)
+    results    = db.relationship('Result',    lazy=True)
 
     def to_dict(self):
         return {

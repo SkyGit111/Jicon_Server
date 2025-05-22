@@ -8,8 +8,9 @@ class Result(db.Model):
     label        = db.Column(db.String(20), nullable=False)
     detection_id = db.Column(db.Integer, db.ForeignKey('detection.id'), nullable=False)
 
-    # 反向关系
-    message   = db.relationship('Message', backref=db.backref('results', lazy=True))
+    # 单向关联 Message（Message.results 由上面修改后的关系管理）
+    message   = db.relationship('Message',   lazy=True)
+    # 与 Detection 维持反向
     detection = db.relationship('Detection', backref=db.backref('results', lazy=True))
 
     def to_dict(self):

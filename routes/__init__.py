@@ -1,11 +1,2 @@
-from .user_routes import user_bp
-from .admin_routes import admin_bp
-# 其他...
-
-def register_routes(app):
-    app.register_blueprint(user_bp)
-    app.register_blueprint(admin_bp)
-
-
-from routes.admin_routes import admin_bp
-app.register_blueprint(admin_bp)
+# routes/__init__.py
+# 这个包由 app.py 动态扫描子模块并注册其中的 Blueprint

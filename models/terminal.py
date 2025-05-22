@@ -7,9 +7,10 @@ class Terminal(db.Model):
     signin_date = db.Column(db.DateTime, nullable=False)
     state = db.Column(db.Boolean, default=False)
 
-    # 外键：关联 UserGroup
+    # 外键：关联 UserGroup，并自动给 UserGroup.terminals 创建反向访问
     group_id = db.Column(db.Integer, db.ForeignKey('user_group.id'), nullable=False)
-    group = db.relationship('UserGroup', backref=db.backref('terminals', lazy=True))
+    group    = db.relationship('UserGroup', backref=db.backref('terminals', lazy=True))
+
 
     def to_dict(self):
         return {
