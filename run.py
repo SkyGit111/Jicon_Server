@@ -26,7 +26,7 @@ def main():
             app.logger.error(f"向量库加载失败: {e}")
 
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 5000))
+    port = int(os.getenv("PORT", 5001))
     app.logger.info(f"▶ 启动服务：{host}:{port}")
     print(f"▶ 启动服务：{host}:{port}", flush=True)
 

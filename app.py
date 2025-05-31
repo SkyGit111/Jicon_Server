@@ -3,8 +3,10 @@
 import pkgutil
 import importlib
 from flask import Flask, Blueprint
+
 from config import Config
 from extensions import init_extensions
+
 
 def create_app():
     app = Flask(__name__)
@@ -25,6 +27,7 @@ def create_app():
     @app.route('/')
     def hello():
         return '系统后端运行中'
+
 
     return app
 
