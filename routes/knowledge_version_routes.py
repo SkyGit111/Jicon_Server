@@ -14,7 +14,7 @@ kv_sch = KnowledgeVersionSchema()
 kv_list_sch = KnowledgeVersionSchema(many=True)
 
 
-@kv_bp.route('/', methods=['GET'])
+@kv_bp.route('/', methods=['GET'], strict_slashes=True)
 @jwt_required()
 def list_knowledge_versions():
     """
