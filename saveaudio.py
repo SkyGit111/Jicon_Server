@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime
 import os
 
-AUDIO_CHUNK_DURATION = 4  # 每4秒保存一个文件
+AUDIO_CHUNK_DURATION = 10  # 每4秒保存一个文件
 FLAC_COMPRESSION_LEVEL = 5  # FLAC压缩级别(0-12)
 
 OUTPUT_FOLDER = "audio_chunks"  # 输出文件夹

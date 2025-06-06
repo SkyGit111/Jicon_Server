@@ -1,5 +1,6 @@
 # routes/terminal_routes.py
 
+import random
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify
@@ -47,36 +48,51 @@ def get_terminal(id):
 
 
 @terminal_bp.route('/', methods=['POST'])
-@jwt_required()
 def create_terminal():
     """
     注册新设备。
     POST /terminals
     Body JSON:
       {
-        "signin_date": "YYYY-MM-DD HH:MM:SS",
-        "state": <true|false>,
-        "group_id": <int>
+        "signin_date": "YYYY-MM-DD HH:MM:SS"
       }
+    说明：
+      - 用户端只需要传 signin_date，系统自动：
+        1) 生成一个唯一的 terminal.id（由数据库自增）
+        2) state 默认为 True
+        3) 从 [UserGroup] 中随机选一个 group_id
+      - 返回新建终端记录 JSON，包括自动分配的 id、signin_date、state、group_id。
     """
-    # 1) 数据校验
+    # 1) 校验并读取 signin_date
     try:
-        data = terminal_schema.load(request.get_json() or {})
-    except ValidationError as err:
-        return jsonify({"error": err.messages}), 400
-
-    # 2) 所属用户组检查
-    if not UserGroup.query.get(data['group_id']):
-        return jsonify({"error": f"group_id {data['group_id']} 不存在"}), 400
-
-    # 3) 解析日期
-    try:
-        sd = datetime.strptime(data['signin_date'], '%Y-%m-%d %H:%M:%S')
-    except ValueError:
+        data = request.get_json() or {}
+        # 只关心 signin_date；其余字段忽略
+        if 'signin_date' not in data:
+            return jsonify({"error": "缺少必填字段 signin_date"}), 400
+        signin_date_str = data['signin_date']
+        # 解析 datetime
+        sd = datetime.strptime(signin_date_str, '%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError):
         return jsonify({"error": "signin_date 格式错误，须 YYYY-MM-DD HH:MM:SS"}), 400
 
-    # 4) 创建并提交
-    term = Terminal(signin_date=sd, state=data['state'], group_id=data['group_id'])
+    # 2) 随机从 UserGroup 表中选一个 group_id
+    user_groups = UserGroup.query.with_entities(UserGroup.id).all()
+    if not user_groups:
+        return jsonify({"error": "系统中没有可用的用户组，请先创建至少一个 UserGroup"}), 400
+
+    # user_groups 是 [(1,), (2,), ...]，转换成单纯的列表 [1,2,...]
+    group_ids = [ug[0] for ug in user_groups]
+    random_group_id = random.choice(group_ids)
+
+    # 3) state 默认为 True
+    default_state = True
+
+    # 4) 构造并保存 Terminal 实例
+    term = Terminal(
+        signin_date=sd,
+        state=default_state,
+        group_id=random_group_id
+    )
     try:
         db.session.add(term)
         db.session.commit()
@@ -84,6 +100,7 @@ def create_terminal():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+    # 5) 返回新建的终端对象
     return terminal_schema.jsonify(term), 201
 
 
@@ -93,10 +110,16 @@ def update_terminal(id):
     """
     更新设备信息（可选更新 signin_date、state、group_id）。
     PUT /terminals/<id>
+    Body JSON 可包含任意组合的字段：
+      {
+        "signin_date": "YYYY-MM-DD HH:MM:SS",  # 可选
+        "state": <true|false>,                  # 可选
+        "group_id": <int>                       # 可选
+      }
     """
     term = Terminal.query.get_or_404(id)
 
-    # 1) 数据校验（部分更新）
+    # 1) 校验（部分更新）
     try:
         data = terminal_schema.load(request.get_json() or {}, partial=True)
     except ValidationError as err:
@@ -108,9 +131,12 @@ def update_terminal(id):
             term.signin_date = datetime.strptime(data['signin_date'], '%Y-%m-%d %H:%M:%S')
         except ValueError:
             return jsonify({"error": "signin_date 格式错误，须 YYYY-MM-DD HH:MM:SS"}), 400
+
     if 'state' in data:
         term.state = data['state']
+
     if 'group_id' in data:
+        # 检查 group_id 是否存在
         if not UserGroup.query.get(data['group_id']):
             return jsonify({"error": f"group_id {data['group_id']} 不存在"}), 400
         term.group_id = data['group_id']

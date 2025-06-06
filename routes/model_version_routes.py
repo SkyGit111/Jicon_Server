@@ -8,10 +8,27 @@ from marshmallow import ValidationError
 from extensions import db
 from models.model_version import ModelVersion
 from schemas.model_version_schema import ModelVersionSchema
+from sendmodel.sendmodel import send_model
 
 mv_bp      = Blueprint('model_versions', __name__, url_prefix='/model_versions')
 mv_sch     = ModelVersionSchema()
 mv_list_sch = ModelVersionSchema(many=True)
+
+@mv_bp.route('/send_model', methods=['POST'])
+@jwt_required()
+def send_model_to_autodl():
+    """
+    发送 model.ckpt 到 AutoDL 实例
+    """
+    try:
+        success = send_model()
+        if success:
+            return jsonify({"msg": "模型推送成功"}), 200
+        else:
+            return jsonify({"msg": "模型推送失败"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @mv_bp.route('/', methods=['GET'])
 @jwt_required()
@@ -101,7 +118,6 @@ def set_online(id):
     return jsonify({"message": f"版本 {id} 已上线"}), 200
 
 @mv_bp.route('/current', methods=['GET'])
-@jwt_required()
 def get_current():
     """获取当前在线的模型版本"""
     mv = ModelVersion.query.filter_by(is_active=True).first()

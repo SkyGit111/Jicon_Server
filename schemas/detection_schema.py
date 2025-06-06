@@ -1,10 +1,6 @@
 from marshmallow import Schema, fields, validate
 from datetime import datetime
 
-def validate_type(value):
-    if value not in ('文本', '语音', '综合', 'text', 'audio', 'mixed'):
-        raise ValueError('type 必须为 “文本”/“语音”/“综合” 或对应英文')
-
 def validate_datetime(value):
     try:
         datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
@@ -15,5 +11,11 @@ class DetectionSchema(Schema):
     id          = fields.Int(dump_only=True)
     date        = fields.Str(validate=validate_datetime)
     message_id  = fields.Int(required=True)
-    type        = fields.Str(required=True, validate=validate_type)
+    # 🔴 删去 type 字段
+    # type        = fields.Str(required=True)
+
+    # 🟢 新增：prob 与 label 字段
+    prob        = fields.Float(required=True)
+    label       = fields.Str(required=True, validate=validate.Length(min=1))
+
     terminal_id = fields.Int(required=True)

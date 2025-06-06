@@ -1,97 +1,72 @@
 # routes/audio_routes.py
-
-import os
-import shutil
-import uuid
-
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
+import uuid, os
+from saveaudio import upload_audio as _upload_audio
+from services.audio_pipeline import process as _process
+from flask import current_app
 
-from saveaudio import upload_audio as _upload_audio  # 切片解密模块
-from text_convert import convert as _convert         # Whisper 转写模块
-from db_search.db_search import detect as _detect_core  # 文本检测模块
+audio_bp = Blueprint("audio_bp", __name__)
 
-audio_bp = Blueprint('audio', __name__, url_prefix='/audio')
-
-
-@audio_bp.route('/upload_wav', methods=['POST'])
+@audio_bp.route("/audio/upload_wav", methods=["POST"])
 @jwt_required()
 def upload_wav():
-    """
-    接收加密的 WAV 音频流，按 4 秒切片 → Whisper 转写 → 文本检测 → 返回结果。
-    所有操作完成后会自动清理临时文件。
-
-    Headers:
-      - Channels: 音频通道数，默认 1
-      - Samplewidth: 样本宽度（字节），默认 2
-      - Samplerate: 采样率（Hz），默认 16000
-      - Userid: 用户唯一标识，默认 "unknown"
-      - Time: 客户端时间戳，默认 "0"
-
-    返回 JSON:
-    {
-      "request_id": "<唯一请求 ID>",
-      "text": "<完整转写文本>",
-      "detections": [ ... 伪声检测结果 ... ]
-    }
-    """
-    # 生成请求 ID，用于隔离并发目录
-    request_id = uuid.uuid4().hex
-    base_dir = os.path.join('tmp_audio', request_id)
-
-    # 1) 解析并校验请求头
     try:
-        channels     = int(request.headers.get('Channels', 1))
-        sample_width = int(request.headers.get('Samplewidth', 2))
-        sample_rate  = int(request.headers.get('Samplerate', 16000))
-        user_id      = request.headers.get('Userid', 'unknown')
-        time_stamp   = request.headers.get('Time', '0')
-    except ValueError:
-        return jsonify({"error": "音频参数格式错误"}), 400
+        # 1. 读取头部
+        user_id     = request.headers.get("Userid", "unknown")
+        ts          = request.headers.get("Time") or str(uuid.uuid4().int)[:13]
+        channels    = int(request.headers.get("Channels", 1))
+        samplewidth = int(request.headers.get("Samplewidth", 2))
+        samplerate  = int(request.headers.get("Samplerate", 16000))
 
-    os.makedirs(base_dir, exist_ok=True)
-
-    try:
-        # 2) 解密并切片
-        #    返回值为 FLAC 文件列表，但此处无需具体使用
-        _upload_audio(
+        # 2. 切片
+        result = _upload_audio(
             stream=request.stream,
             channels=channels,
-            sample_width=sample_width,
-            sample_rate=sample_rate,
-            output_dir=base_dir
-        )
-    except Exception as e:
-        shutil.rmtree(base_dir, ignore_errors=True)
-        return jsonify({"error": f"音频切片失败: {e}"}), 500
-
-    try:
-        # 3) 调用 Whisper 转写所有切片并拼接结果
-        text = _convert(
-            filepath=base_dir,
+            sample_width=samplewidth,
+            sample_rate=samplerate,
             user_id=user_id,
-            time=time_stamp,
-            text="",
-            length=2048
+            time=ts
         )
-    except Exception as e:
-        shutil.rmtree(base_dir, ignore_errors=True)
-        return jsonify({"error": f"音频转写失败: {e}"}), 500
+        if result.get("status") != "success":
+            return jsonify({"error": result.get("message")}), 500
 
+        chunk_dir   = "audio_chunks"
+        chunk_count = result["chunks_saved"]
+
+        # 3. 统一业务逻辑
+        payload = _process(user_id, ts, chunk_dir, chunk_count)
+        return jsonify(payload), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+# routes/audio_routes.py （追加到文件末尾）
+
+
+
+@audio_bp.route("/audio_detect", methods=["POST"])
+def audio_detect():
+    """
+    内部接口：WebSocket 服务调用。
+    Body: { "user_id": <str/int>, "timestamp": <str>, "chunk_count": <int> }
+    """
     try:
-        # 4) 调用文本检测核心
-        detections = _detect_core(text)
+        data        = request.get_json() or {}
+        user_id     = str(data["user_id"])
+        ts          = str(data["timestamp"])
+        chunk_count = int(data["chunk_count"])
+        chunk_dir   = "audio_chunks"   # 与 websocket.py 保持一致
+
+        payload = _process(user_id, ts, chunk_dir, chunk_count)
+        # 可在此记录一次完整检测日志
+        current_app.logger.info(f"[audio_detect] 完成 user={user_id}, ts={ts}, chunks={chunk_count}")
+        return jsonify(payload), 200
+
+    except KeyError as e:
+        return jsonify({"error": f"缺少字段 {e}"}), 400
     except Exception as e:
-        shutil.rmtree(base_dir, ignore_errors=True)
-        return jsonify({"error": f"伪声检测失败: {e}"}), 500
-
-    # 5) 返回结果
-    response = jsonify({
-        "request_id": request_id,
-        "text": text,
-        "detections": detections
-    }), 200
-
-    # 6) 清理临时目录
-    shutil.rmtree(base_dir, ignore_errors=True)
-    return response
+        current_app.logger.error(f"[audio_detect] 失败: {e}")
+        return jsonify({"error": str(e)}), 500
